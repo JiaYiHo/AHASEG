@@ -1,0 +1,8 @@
+*.asv
+.htaccess
+.ipynb_checkpoints
+*.pyc
+__pycache__
+resultdir/*.png
+resultdir/*.mat
+.vscode
