@@ -1,6 +1,6 @@
 import numpy as np
 import scipy.ndimage as ndi
-
+import matplotlib.pyplot as plt
 import copy
 
 # %%
@@ -130,4 +130,130 @@ def LVseg(LVbmask, LVwmask, RVbmask, nseg=4):
 
 
     return LVSeg_label
-        
+
+
+def save_fig(AHAdt,figfile):
+    def color_over(t1map,lvseg):
+        t1map = t1map/t1map.flatten().max()*255
+        t1map = t1map*(lvseg<1)+(lvseg>0)*256+lvseg
+        return t1map
+
+    cmap = plt.cm.gray
+    jet = plt.cm.nipy_spectral
+    cmaplist = [cmap(i) for i in range(cmap.N)] + [ii for ii in jet(np.arange(0,230,230//17))]
+    cmap_new = cmap.from_list('Custom cmap', cmaplist)
+    ima_all=[]
+    for key in ['B','M','A']:
+        try:
+            t1map = color_over(AHAdt['map_'+key],AHAdt['LV_Seg_'+key])
+            ima_all.append(np.hstack([t1map,np.ones((t1map.shape[0],10))*255]))
+        except:
+            pass
+    ima_stack = np.hstack([im for im in ima_all])
+    fig = plt.figure(figsize=(30,10), dpi=600)
+    plt.imshow(ima_stack,cmap=cmap_new),plt.clim([0, len(cmaplist)])
+    plt.axis('off')
+    plt.savefig(figfile, bbox_inches='tight')
+    plt.close(fig)
+#%%
+
+def cal_slice(slice_dict, slicename):
+    def Mean(LV_seg, cal_map):
+        #max_index = int(np.max(LV_seg))
+        val_mean = np.zeros(6)
+        val_median = np.zeros(6)
+        voxels = [0]*6
+        for ii in range(6):
+            aha_index = ii + 1
+            if (LV_seg == aha_index).sum() > 0:
+                voxels[ii] = cal_map[np.nonzero(LV_seg == aha_index)]
+                #print(voxels[ii])
+                val_mean[ii] = np.mean(voxels[ii]).round(3)
+                val_median[ii] = np.median(voxels[ii]).round(3)
+        return val_mean, val_median, voxels
+
+
+    if slice_dict is None:
+        if slicename == 'A':
+            val_mean = np.zeros(4)
+            empty_voxel = [np.array([0])]*4
+        else:
+            val_mean = np.zeros(6)
+            empty_voxel = [np.array([0])]*6
+        return val_mean,val_mean, None, empty_voxel
+    
+    LVb_mask = slice_dict['LVb_mask']
+    LVw_mask = slice_dict['LVw_mask']
+    RVb_mask = slice_dict['RVb_mask']
+    Qmap = slice_dict['Qmap']
+
+    if slicename == 'A':
+        LVSeg_label = LVseg(LVb_mask, LVw_mask, RVb_mask, nseg=4)
+    else:
+        LVSeg_label = LVseg(LVb_mask, LVw_mask, RVb_mask, nseg=6)
+
+    val_mean, val_median, voxels = Mean(LVSeg_label, Qmap)
+    AHAlabel_offset={'B': 1, 'M': 7, 'A': 13}
+    LVSeg_label[LVSeg_label>0] += AHAlabel_offset[slicename]
+
+    if slicename == 'A':
+        val_mean = val_mean[:4]
+        val_median = val_median[:4]
+        voxels = voxels[:4]
+
+    return  val_mean, val_median, LVSeg_label, voxels
+# %%
+
+
+def AHA17(B=None, M=None, A=None,figname=None):
+    dcAHA = {'mean17': np.zeros(17), 'median17': np.zeros(17)}
+    dcRange = {'B': (0, 6), 'M': (6,12), 'A': (12,16)}
+    dcAHA['voxels_all'] = []
+    for ii, slicen in enumerate(['B', 'M', 'A']):
+        istart, iend = dcRange[slicen]
+        dcSlice = eval(slicen)
+        dcAHA['mean17'][istart:iend],\
+        dcAHA['median17'][istart:iend],\
+        dcAHA['LV_Seg_' + slicen],\
+        voxels  = cal_slice(copy.copy(dcSlice), slicen)
+        if dcSlice is not None:
+            dcAHA['map_' + slicen] = dcSlice['Qmap']    
+
+        dcAHA['voxels_all'] += voxels
+            #septum voxels [2,3,8,9,14]
+
+    septum_vox = [dcAHA['voxels_all'][ii-1] for ii in [2,3,8,9,14]]
+
+    #for ii in septum_vox:
+        #print(ii.shape)
+    #print(septum_vox)
+    septum_vox = np.concatenate(tuple(septum_vox))
+    septum_vox = septum_vox[septum_vox>0]
+    dcAHA['septum_voxels'] = septum_vox
+
+
+    dcAHA['septum_median'] = np.round(np.median(septum_vox),3)
+    dcAHA['septum_mean'] = np.round(np.mean(septum_vox),3)
+
+    nonsep_vox = [dcAHA['voxels_all'][ii-1] for ii in [1,4,5,6,10,11,12,13,15,16]]
+    nonsep_vox = np.concatenate(tuple(nonsep_vox))
+    nonsep_vox = nonsep_vox[nonsep_vox>0]
+    dcAHA['nonsep_voxels'] = nonsep_vox
+
+    dcAHA['nonsep_median'] = np.round(np.median(nonsep_vox),3)
+    dcAHA['nonsep_mean'] = np.round(np.mean(nonsep_vox),3)
+
+    global_vox = dcAHA['voxels_all']
+    global_vox = np.concatenate(tuple(global_vox))
+    global_vox = global_vox[global_vox>0]
+    dcAHA['global_voxels'] = global_vox
+
+    dcAHA['global_median'] = np.round(np.median(global_vox),3)
+    dcAHA['global_mean'] = np.round(np.mean(global_vox),3)
+
+    if figname is not None:
+        save_fig(dcAHA,figname)
+
+
+    return dcAHA
+
